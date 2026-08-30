@@ -1,0 +1,20 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+terraform.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secrets — never commit your Konnect cert/key
+certs/*.crt
+certs/*.key
+
+# Local kubeconfig exports
+*.kubeconfig
+kong-demo-config

@@ -1,0 +1,60 @@
+# Copy this file to terraform.tfvars and fill in your own values.
+# terraform.tfvars is gitignored on purpose — it holds environment-specific
+# Konnect endpoints.
+
+kong_helm_values = {
+  ingressController = {
+    enabled = false
+  }
+
+  image = {
+    repository = "kong/kong-gateway"
+    tag        = "3.15"
+  }
+
+  secretVolumes = ["kong-cluster-cert"]
+
+  env = {
+    role         = "data_plane"
+    database     = "off"
+    konnect_mode = "on"
+    vitals       = "off"
+    cluster_mtls = "pki"
+
+    cluster_control_plane         = "<your-control-plane-endpoint>"
+    cluster_telemetry_endpoint    = "<your-telemetry-endpoint>:443"
+    cluster_telemetry_server_name = "<your-telemetry-endpoint>"
+    cluster_cert                  = "/etc/secrets/kong-cluster-cert/tls.crt"
+    cluster_cert_key              = "/etc/secrets/kong-cluster-cert/tls.key"
+
+    lua_ssl_trusted_certificate = "system"
+    proxy_access_log            = "off"
+    dns_stale_ttl               = "3600"
+  }
+
+  resources = {
+    requests = {
+      cpu    = 1
+      memory = "2Gi"
+    }
+  }
+
+  proxy = {
+    enabled = true
+  }
+
+  admin = {
+    enabled = false
+  }
+
+  manager = {
+    enabled = false
+  }
+}
+
+# Optional overrides — defaults are already set in variables.tf
+# resource_group_name = "kong-demo-rg"
+# location             = "eastus"
+# cluster_name         = "kong-demo-aks"
+# node_count           = 2
+# node_vm_size         = "Standard_D4s_v7"

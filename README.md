@@ -1,4 +1,4 @@
-# kong-aks-terraform
+# Azure-Kong-IaC
 
 Provisions an AKS cluster and deploys a Kong Konnect Data Plane node
 (Self-Managed Hybrid) into it — entirely as Terraform code. No manual

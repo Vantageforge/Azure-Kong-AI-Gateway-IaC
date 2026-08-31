@@ -92,3 +92,40 @@ kong-aks-terraform/
 ```bash
 terraform destroy
 ```
+
+## Sending logs, metrics, and traces to Datadog
+
+This project deploys a **Datadog Agent** DaemonSet (logs, OpenMetrics scraping,
+and an OTLP receiver for traces) alongside Kong. Two things live outside
+Terraform because Konnect — not the Helm chart — owns plugin configuration
+for Self-Managed Hybrid data planes:
+
+1. **Enable the `prometheus` plugin** (metrics): Konnect → Gateway Manager →
+   **Plugins → New Plugin → Prometheus**, scope: **Global**. This turns on
+   the `/metrics` endpoint the Datadog Agent scrapes via the `podAnnotations`
+   already set in `terraform.tfvars`.
+
+2. **Enable the `opentelemetry` plugin** (traces): Konnect → **Plugins →
+   New Plugin → OpenTelemetry**, scope: Global. Set the traces endpoint to
+   the in-cluster Datadog Agent OTLP HTTP receiver:
+
+   ```
+   http://datadog.datadog.svc.cluster.local:4318/v1/traces
+   ```
+
+Logs need no extra plugin — Kong's access/error logs go to stdout/stderr
+(`proxy_access_log` / `proxy_error_log` in `terraform.tfvars`) and the
+Datadog Agent's `containerCollectAll` picks them up automatically, tagged
+with `namespace:kong`.
+
+Before applying, set your Datadog API key and site in `terraform.tfvars`
+(or, preferably, export it instead of committing it):
+
+```bash
+export TF_VAR_datadog_api_key="<your-datadog-api-key>"
+```
+
+Verify in Datadog after `terraform apply`:
+- **Logs → Live Tail**, filter `namespace:kong`
+- **Metrics Explorer**, search `kong.*`
+- **APM → Traces**, service `kong` (once the OpenTelemetry plugin is set)

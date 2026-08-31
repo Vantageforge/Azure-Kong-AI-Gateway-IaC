@@ -7,8 +7,7 @@ traces — entirely as Terraform code. No manual `az aks create`,
 
 ## Architecture
 
-<img src="assets/architecture.svg" alt="Animated architecture diagram: Kong Konnect control plane synced with an AKS-hosted Kong data plane node and Datadog agent, proxying requests to a backend" width="700">
-<img width="1000" height="900" alt="image" src="https://github.com/user-attachments/assets/3d347485-6aa1-42c3-bd1b-a71f4465b1b2" />
+ 
 
 <details>
 <summary>Text version</summary>
@@ -28,6 +27,7 @@ Azure → Resource group → AKS cluster
 
 </details>
 
+<img width="1000" height="900" alt="image" src="https://github.com/user-attachments/assets/3d347485-6aa1-42c3-bd1b-a71f4465b1b2" />
 
 **Control plane / data plane split:** Kong Konnect holds the managed
 control plane. The AKS cluster runs the self-managed data plane node,

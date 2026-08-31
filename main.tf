@@ -46,6 +46,8 @@ resource "azurerm_kubernetes_cluster" "kong" {
     type = "SystemAssigned"
   }
 
+  oidc_issuer_enabled = true
+
   tags = {
     project = "kong-aks-terraform"
   }
@@ -108,4 +110,69 @@ resource "helm_release" "kong" {
   values = [yamlencode(var.kong_helm_values)]
 
   depends_on = [kubernetes_secret.kong_cluster_cert]
+}
+
+# ---------------------------------------------------------------------------
+# Datadog Agent — logs, metrics (OpenMetrics scrape of Kong), and traces (OTLP)
+# ---------------------------------------------------------------------------
+
+resource "kubernetes_namespace" "datadog" {
+  metadata {
+    name = var.datadog_namespace
+  }
+}
+
+resource "kubernetes_secret" "datadog_api_key" {
+  metadata {
+    name      = "datadog-secret"
+    namespace = kubernetes_namespace.datadog.metadata[0].name
+  }
+
+  data = {
+    api-key = var.datadog_api_key
+  }
+}
+
+resource "helm_release" "datadog" {
+  name       = "datadog"
+  repository = "https://helm.datadoghq.com"
+  chart      = "datadog"
+  namespace  = kubernetes_namespace.datadog.metadata[0].name
+
+  values = [yamlencode({
+    datadog = {
+      site                 = var.datadog_site
+      apiKeyExistingSecret = kubernetes_secret.datadog_api_key.metadata[0].name
+      clusterName          = var.cluster_name
+
+      # Logs — auto-collects stdout/stderr from every pod, including Kong's
+      # access/error logs once proxy_access_log/proxy_error_log point at
+      # /dev/stdout and /dev/stderr in kong_helm_values.
+      logs = {
+        enabled             = true
+        containerCollectAll = true
+      }
+
+      # Traces — Agent exposes an OTLP receiver that the Kong `opentelemetry`
+      # plugin (enabled in Konnect) can export to.
+      apm = {
+        portEnabled = true
+      }
+      otlp = {
+        receiver = {
+          protocols = {
+            grpc = { enabled = true }
+            http = { enabled = true }
+          }
+        }
+      }
+
+      processAgent = {
+        enabled           = true
+        processCollection = true
+      }
+    }
+  })]
+
+  depends_on = [kubernetes_secret.datadog_api_key]
 }

@@ -44,6 +44,28 @@ variable "kong_helm_values" {
   type = any
 }
 
+variable "datadog_api_key" {
+  description = <<-EOT
+    Datadog API key (Organization Settings -> API Keys).
+    Sensitive — set this via TF_VAR_datadog_api_key env var or a secrets
+    manager rather than committing it in terraform.tfvars where possible.
+  EOT
+  type      = string
+  sensitive = true
+}
+
+variable "datadog_site" {
+  description = "Datadog site, e.g. datadoghq.com (US1), datadoghq.eu (EU1), us3.datadoghq.com (US3), us5.datadoghq.com (US5), ap1.datadoghq.com (AP1)"
+  type        = string
+  default     = "datadoghq.com"
+}
+
+variable "datadog_namespace" {
+  description = "Kubernetes namespace to deploy the Datadog Agent into"
+  type        = string
+  default     = "datadog"
+}
+
 variable "kong_cert_path" {
   description = "Path to the Konnect-issued TLS certificate"
   type        = string

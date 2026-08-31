@@ -129,3 +129,6 @@ Verify in Datadog after `terraform apply`:
 - **Logs → Live Tail**, filter `namespace:kong`
 - **Metrics Explorer**, search `kong.*`
 - **APM → Traces**, service `kong` (once the OpenTelemetry plugin is set)
+
+## Terraform Logs
+<img width="1659" height="713" alt="image" src="https://github.com/user-attachments/assets/e7cec337-03b3-46bc-b9b0-9f5f19be30e3" />

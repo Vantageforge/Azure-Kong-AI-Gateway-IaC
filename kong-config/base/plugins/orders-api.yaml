@@ -1,0 +1,47 @@
+_format_version: "3.0"
+
+plugins:
+  - name: rate-limiting
+    service: orders-api
+    config:
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+      minute: ${{ env "DECK_ORDERS_API_RATE_LIMIT" }}
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Tag every request the gateway forwards so it's traceable back to Kong
+  # in upstream logs, independent of the global correlation-id plugin.
+  - name: request-transformer
+    route: orders-api-crud
+    config:
+      add:
+        headers:
+          - "X-Gateway:kong-aks"
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Strip an internal debug header the upstream shouldn't leak externally.
+  - name: response-transformer
+    route: orders-api-crud
+    config:
+      remove:
+        headers:
+          - X-Internal-Debug
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Webhook route: HMAC-signed requests only, no browser CORS needed.
+  - name: hmac-auth
+    route: orders-api-webhook
+    config:
+      clock_skew: 300
+      validate_request_body: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+      - access:webhook

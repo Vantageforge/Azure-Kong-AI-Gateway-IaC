@@ -1,0 +1,16 @@
+_format_version: "3.0"
+
+# ---------------------------------------------------------------------------
+# orders-api — owns order creation + a partner-facing webhook callback.
+# ---------------------------------------------------------------------------
+services:
+  - name: orders-api
+    url: '${{ env "DECK_ORDERS_API_UPSTREAM_URL" }}'
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    retries: 3
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - team:commerce
+      - domain:orders

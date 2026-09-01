@@ -1,0 +1,22 @@
+_format_version: "3.0"
+
+# ---------------------------------------------------------------------------
+# Consumers referenced by the key-auth / hmac-auth plugins above.
+# Credential *values* are never committed — they come from DECK_* env vars
+# populated from a secrets manager / CI secret store per environment.
+# ---------------------------------------------------------------------------
+consumers:
+  - username: internal-admin-console
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - consumer-type:internal
+    keyauth_credentials:
+      - key: '${{ env "DECK_ADMIN_CONSOLE_API_KEY" }}'
+
+  - username: partner-payments
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - consumer-type:partner
+    hmacauth_credentials:
+      - username: '${{ env "DECK_PARTNER_HMAC_USERNAME" }}'
+        secret: '${{ env "DECK_PARTNER_HMAC_SECRET" }}'

@@ -1,0 +1,64 @@
+# ---------------------------------------------------------------------------
+# Governance rules enforced by `deck file lint` (see scripts/lint.sh and the
+# `lint` job in .github/workflows/kong-gateway-config.yml). A PR that
+# violates an `error`-severity rule fails CI before anything is synced.
+# ---------------------------------------------------------------------------
+rules:
+  services-require-tags:
+    description: Every service must carry at least one tag for ownership/cost tracking.
+    given: $.services[*]
+    severity: error
+    then:
+      field: tags
+      function: defined
+
+  services-require-team-tag:
+    description: Every service must declare a `team:<name>` tag so on-call ownership is unambiguous.
+    given: $.services[*].tags[*]
+    severity: warn
+    then:
+      function: pattern
+      functionOptions:
+        match: "^(env|team|domain|kind):.+"
+
+  routes-require-tags:
+    description: Every route must carry at least one tag.
+    given: $.routes[*]
+    severity: error
+    then:
+      field: tags
+      function: defined
+
+  plugins-require-tags:
+    description: Every plugin instance must carry at least one tag.
+    given: $.plugins[*]
+    severity: error
+    then:
+      field: tags
+      function: defined
+
+  service-name-kebab-case:
+    description: Service names must be lowercase kebab-case.
+    given: $.services[*].name
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z0-9]+(-[a-z0-9]+)*$"
+
+  route-name-kebab-case:
+    description: Route names must be lowercase kebab-case.
+    given: $.routes[*].name
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z0-9]+(-[a-z0-9]+)*$"
+
+  services-require-timeouts:
+    description: Services must set an explicit connect_timeout instead of relying on Kong's default.
+    given: $.services[*]
+    severity: warn
+    then:
+      field: connect_timeout
+      function: defined

@@ -1,0 +1,59 @@
+_format_version: "3.0"
+
+plugins:
+  # Service-wide CORS — applies to both routes below.
+  - name: cors
+    service: users-api
+    config:
+      origins:
+        - '${{ env "DECK_CORS_ALLOWED_ORIGIN" }}'
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      credentials: true
+      max_age: 3600
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+
+  # Public GETs: no auth, but capped per-IP so the endpoint can't be scraped.
+  - name: rate-limiting
+    route: users-api-public-read
+    config: &standard_rate_limiting
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+      minute: ${{ env "DECK_USERS_API_PUBLIC_RATE_LIMIT" }}
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+      - access:public-read
+
+  # Admin writes: key-auth required...
+  - name: key-auth
+    route: users-api-admin-write
+    config:
+      key_names:
+        - apikey
+      hide_credentials: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+      - access:admin
+
+  # ...and a separate, tighter per-consumer budget. Reuses the same policy
+  # shape as the public route via the YAML anchor above — only the limit
+  # itself differs.
+  - name: rate-limiting
+    route: users-api-admin-write
+    config:
+      <<: *standard_rate_limiting
+      minute: ${{ env "DECK_USERS_API_ADMIN_RATE_LIMIT" }}
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+      - access:admin

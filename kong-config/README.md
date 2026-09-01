@@ -128,11 +128,11 @@ than to be a real product catalog:
   `users-api-admin-write` (`POST`/`PUT`/`PATCH`/`DELETE`, `key-auth` +
   its own tighter rate limit). Same Service-level `cors` plugin covers
   both.
-- **`orders-api`** — `orders-api-crud` (customer-facing, `request-transformer`
-  adds a header, `response-transformer` strips an internal one) and
-  `orders-api-webhook` (`hmac-auth` instead of key-auth, for a
-  partner-signed callback). Service-level `rate-limiting` covers both
-  routes at once.
+- **`orders-api`** — `orders-api-crud` (customer-facing, `key-auth`
+  required, `request-transformer` adds a header, `response-transformer`
+  strips an internal one) and `orders-api-webhook` (`hmac-auth` instead of
+  key-auth, for a partner-signed callback). Service-level `rate-limiting`
+  covers both routes at once.
 
 `base/consumers.yaml` defines the two consumers those plugins reference —
 `internal-admin-console` (key-auth) and `partner-payments` (hmac-auth) —

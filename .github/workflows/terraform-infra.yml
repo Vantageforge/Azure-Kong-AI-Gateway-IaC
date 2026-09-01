@@ -1,0 +1,175 @@
+name: Terraform Infra (AKS + Kong Data Plane + Datadog)
+
+# Provisions/updates the infra layer defined in main.tf: AKS cluster, Kong
+# Gateway data-plane Helm release, and the Datadog Agent. This is separate
+# from kong-gateway-config.yml, which only manages Services/Routes/Plugins
+# on top of an already-running data plane.
+#
+# Auth: Azure OIDC / federated credentials (no stored client secret). See
+# README.md "Terraform CI/CD setup" for the one-time az ad app registration.
+# State: remote azurerm backend (Azure Storage + Azure AD/RBAC auth). See
+# scripts/bootstrap-terraform-backend.sh for the one-time bootstrap.
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - "terraform.tfvars.example"
+      - ".github/workflows/terraform-infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**.tf"
+      - ".github/workflows/terraform-infra.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+  TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+  TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+  TF_VERSION: "1.7.5"
+
+jobs:
+  # Format + syntax validation only. No Azure credentials required, so this
+  # always runs, including for PRs from forks.
+  validate:
+    name: terraform fmt / validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (no backend, no credentials)
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        run: terraform validate
+
+  # Renders a plan against real Azure state and posts it on the PR. Needs
+  # OIDC credentials and the Konnect/Datadog secrets, so it's best-effort:
+  # a fork PR or a run before secrets are configured won't block validate.
+  plan:
+    name: terraform plan
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Render tfvars + certs from secrets
+        env:
+          KONG_TLS_CRT_B64: ${{ secrets.KONG_TLS_CRT_B64 }}
+          KONG_TLS_KEY_B64: ${{ secrets.KONG_TLS_KEY_B64 }}
+          KONG_CLUSTER_CONTROL_PLANE: ${{ secrets.KONG_CLUSTER_CONTROL_PLANE }}
+          KONG_CLUSTER_TELEMETRY_ENDPOINT: ${{ secrets.KONG_CLUSTER_TELEMETRY_ENDPOINT }}
+          KONG_CLUSTER_TELEMETRY_SERVER_NAME: ${{ secrets.KONG_CLUSTER_TELEMETRY_SERVER_NAME }}
+          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+        run: bash scripts/render-tfvars.sh
+
+      - name: terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${TF_STATE_CONTAINER}" \
+            -backend-config="key=kong-aks.tfstate"
+
+      - name: terraform plan
+        id: plan
+        run: terraform plan -no-color -input=false -out=tfplan
+        continue-on-error: true
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan: \`${{ steps.plan.outcome }}\`
+            <details><summary>Show plan</summary>
+
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+
+            </details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+  # Applies to real infra. Manual dispatch only, gated by the terraform-infra
+  # GitHub Environment (configure required reviewers there) — mirrors the
+  # sync-prod job pattern in kong-gateway-config.yml.
+  apply:
+    name: terraform apply
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'workflow_dispatch'
+    environment: terraform-infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Render tfvars + certs from secrets
+        env:
+          KONG_TLS_CRT_B64: ${{ secrets.KONG_TLS_CRT_B64 }}
+          KONG_TLS_KEY_B64: ${{ secrets.KONG_TLS_KEY_B64 }}
+          KONG_CLUSTER_CONTROL_PLANE: ${{ secrets.KONG_CLUSTER_CONTROL_PLANE }}
+          KONG_CLUSTER_TELEMETRY_ENDPOINT: ${{ secrets.KONG_CLUSTER_TELEMETRY_ENDPOINT }}
+          KONG_CLUSTER_TELEMETRY_SERVER_NAME: ${{ secrets.KONG_CLUSTER_TELEMETRY_SERVER_NAME }}
+          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+        run: bash scripts/render-tfvars.sh
+
+      - name: terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${TF_STATE_CONTAINER}" \
+            -backend-config="key=kong-aks.tfstate"
+
+      - name: terraform apply
+        run: terraform apply -auto-approve -input=false

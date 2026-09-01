@@ -1,0 +1,35 @@
+_format_version: "3.0"
+
+routes:
+  # Public, read-only lookups — no credential required, but rate-limited
+  # per-IP so the service can't be scraped.
+  - name: users-api-public-read
+    service:
+      name: users-api
+    paths:
+      - /api/v1/users
+    methods:
+      - GET
+    strip_path: false
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+      - access:public-read
+
+  # Mutating operations — key-auth required, tighter rate limit, always
+  # scoped to admin/internal consumers.
+  - name: users-api-admin-write
+    service:
+      name: users-api
+    paths:
+      - /api/v1/users
+    methods:
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    strip_path: false
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:users
+      - access:admin

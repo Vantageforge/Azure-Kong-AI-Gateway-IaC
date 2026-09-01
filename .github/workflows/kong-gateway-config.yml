@@ -1,0 +1,184 @@
+name: Kong Gateway Config (decK)
+
+# APIOps pipeline for kong-config/ — Gateway Services, Routes, Plugins and
+# Consumers, managed declaratively and synced to Kong Konnect with decK.
+# This is deliberately separate from any Terraform/infra pipeline: this
+# workflow only ever talks to Konnect's control-plane API, never to Azure.
+on:
+  pull_request:
+    paths:
+      - "kong-config/**"
+      - ".github/workflows/kong-gateway-config.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kong-config/**"
+      - ".github/workflows/kong-gateway-config.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to sync manually — only prod is wired up here; dev/staging sync automatically on push to main."
+        required: true
+        default: prod
+        type: choice
+        options: [prod]
+
+permissions:
+  contents: read
+
+env:
+  DECK_VERSION: "1.44.1"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Every PR that touches kong-config/: render + lint all three
+  # environments, then show a diff against each so reviewers can see the
+  # actual effect before merge. Never syncs anything.
+  # ---------------------------------------------------------------------
+  render-and-lint:
+    name: Render & lint (${{ matrix.environment }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install decK
+        run: |
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
+          deck version
+
+      - name: Render
+        run: kong-config/scripts/render.sh ${{ matrix.environment }}
+
+      - name: Lint
+        run: kong-config/scripts/lint.sh ${{ matrix.environment }}
+
+      - name: Upload rendered config
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-config-${{ matrix.environment }}
+          path: kong-config/.rendered/${{ matrix.environment }}.yaml
+          retention-days: 14
+
+  diff-preview:
+    name: Diff against Konnect (${{ matrix.environment }})
+    if: github.event_name == 'pull_request'
+    needs: render-and-lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging]
+    # Diff needs real Konnect credentials, so it's best-effort on forked
+    # PRs where secrets aren't available — `continue-on-error` keeps the
+    # required render-and-lint job as the actual merge gate.
+    continue-on-error: true
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install decK
+        run: |
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
+
+      - name: deck gateway diff
+        env:
+          DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+          DECK_KONNECT_CONTROL_PLANE_NAME: ${{ vars.KONNECT_CONTROL_PLANE_NAME }}
+          DECK_ADMIN_CONSOLE_API_KEY: ${{ secrets.ADMIN_CONSOLE_API_KEY }}
+          DECK_PARTNER_HMAC_USERNAME: ${{ secrets.PARTNER_HMAC_USERNAME }}
+          DECK_PARTNER_HMAC_SECRET: ${{ secrets.PARTNER_HMAC_SECRET }}
+        run: kong-config/scripts/diff.sh ${{ matrix.environment }}
+
+  # ---------------------------------------------------------------------
+  # main is auto-deployed to dev, then staging. Prod is intentionally
+  # NOT synced on push — it only runs via workflow_dispatch, gated by the
+  # "prod" GitHub Environment's required reviewers.
+  # ---------------------------------------------------------------------
+  sync-dev:
+    name: Sync dev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: dev
+    concurrency:
+      group: kong-sync-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install decK
+        run: |
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
+      - name: deck gateway sync (dev)
+        env:
+          DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+          DECK_KONNECT_CONTROL_PLANE_NAME: ${{ vars.KONNECT_CONTROL_PLANE_NAME }}
+          DECK_ADMIN_CONSOLE_API_KEY: ${{ secrets.ADMIN_CONSOLE_API_KEY }}
+          DECK_PARTNER_HMAC_USERNAME: ${{ secrets.PARTNER_HMAC_USERNAME }}
+          DECK_PARTNER_HMAC_SECRET: ${{ secrets.PARTNER_HMAC_SECRET }}
+        run: kong-config/scripts/sync.sh dev
+
+  sync-staging:
+    name: Sync staging
+    needs: sync-dev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: kong-sync-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install decK
+        run: |
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
+      - name: deck gateway sync (staging)
+        env:
+          DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+          DECK_KONNECT_CONTROL_PLANE_NAME: ${{ vars.KONNECT_CONTROL_PLANE_NAME }}
+          DECK_ADMIN_CONSOLE_API_KEY: ${{ secrets.ADMIN_CONSOLE_API_KEY }}
+          DECK_PARTNER_HMAC_USERNAME: ${{ secrets.PARTNER_HMAC_USERNAME }}
+          DECK_PARTNER_HMAC_SECRET: ${{ secrets.PARTNER_HMAC_SECRET }}
+        run: kong-config/scripts/sync.sh staging
+
+  sync-prod:
+    name: Sync prod (manual)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    # The "prod" GitHub Environment should have required reviewers configured
+    # in Settings -> Environments — that's the actual approval gate, this
+    # workflow just refuses to run sync-prod any other way.
+    environment: prod
+    concurrency:
+      group: kong-sync-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install decK
+        run: |
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
+      - name: deck gateway sync (prod)
+        env:
+          DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
+          DECK_KONNECT_CONTROL_PLANE_NAME: ${{ vars.KONNECT_CONTROL_PLANE_NAME }}
+          DECK_ADMIN_CONSOLE_API_KEY: ${{ secrets.ADMIN_CONSOLE_API_KEY }}
+          DECK_PARTNER_HMAC_USERNAME: ${{ secrets.PARTNER_HMAC_USERNAME }}
+          DECK_PARTNER_HMAC_SECRET: ${{ secrets.PARTNER_HMAC_SECRET }}
+          CONFIRM_PROD_SYNC: "yes"
+        run: kong-config/scripts/sync.sh prod

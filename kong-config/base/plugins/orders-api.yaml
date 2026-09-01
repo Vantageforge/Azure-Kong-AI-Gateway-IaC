@@ -1,0 +1,71 @@
+_format_version: "3.0"
+
+plugins:
+  - name: rate-limiting
+    service: orders-api
+    config:
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+      minute: ${{ env "DECK_ORDERS_API_RATE_LIMIT" }}
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Customer-facing CRUD had nothing gating it — unlike the webhook route
+  # below, or users-api's admin-write route, GET/POST on /api/v1/orders
+  # was reachable with zero auth. key-auth is the simplest complete
+  # example that matches the pattern users-api already uses for its
+  # admin-write route; swap for whatever your real customer auth is
+  # (OAuth2, JWT, etc.) when wiring up a real upstream.
+  - name: key-auth
+    route: orders-api-crud
+    config:
+      key_names:
+        - apikey
+      hide_credentials: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+      - access:customer
+
+  # Tag every request the gateway forwards so it's traceable back to Kong
+  # in upstream logs, independent of the global correlation-id plugin.
+  # `remove` before `add` (Kong runs header ops in that order: remove,
+  # rename, replace, add, append) so this always wins even if the client
+  # sends its own X-Gateway header — `add` alone only sets a header that
+  # isn't already present, so a client could otherwise suppress the tag.
+  - name: request-transformer
+    route: orders-api-crud
+    config:
+      remove:
+        headers:
+          - X-Gateway
+      add:
+        headers:
+          - "X-Gateway:kong-aks"
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Strip an internal debug header the upstream shouldn't leak externally.
+  - name: response-transformer
+    route: orders-api-crud
+    config:
+      remove:
+        headers:
+          - X-Internal-Debug
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Webhook route: HMAC-signed requests only, no browser CORS needed.
+  - name: hmac-auth
+    route: orders-api-webhook
+    config:
+      clock_skew: 300
+      validate_request_body: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+      - access:webhook

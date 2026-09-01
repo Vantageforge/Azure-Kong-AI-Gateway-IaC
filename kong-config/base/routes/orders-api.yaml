@@ -1,0 +1,30 @@
+_format_version: "3.0"
+
+routes:
+  - name: orders-api-crud
+    service:
+      name: orders-api
+    paths:
+      - /api/v1/orders
+    methods:
+      - GET
+      - POST
+    strip_path: false
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+
+  # Inbound webhook from the payment partner — separate route so it can
+  # carry its own auth/rate-limit policy instead of the customer-facing one.
+  - name: orders-api-webhook
+    service:
+      name: orders-api
+    paths:
+      - /api/v1/orders/webhook
+    methods:
+      - POST
+    strip_path: false
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - domain:orders
+      - access:webhook

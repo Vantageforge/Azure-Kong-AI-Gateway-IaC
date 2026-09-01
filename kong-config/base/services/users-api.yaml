@@ -1,0 +1,16 @@
+_format_version: "3.0"
+
+# ---------------------------------------------------------------------------
+# users-api — owns account/profile data. Public reads, admin-only writes.
+# ---------------------------------------------------------------------------
+services:
+  - name: users-api
+    url: '${{ env "DECK_USERS_API_UPSTREAM_URL" }}'
+    connect_timeout: 5000
+    write_timeout: 20000
+    read_timeout: 20000
+    retries: 3
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - team:identity
+      - domain:users

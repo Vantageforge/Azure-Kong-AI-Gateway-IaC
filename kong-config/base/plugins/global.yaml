@@ -1,0 +1,53 @@
+_format_version: "3.0"
+
+# ---------------------------------------------------------------------------
+# Global plugins — no `service`/`route`/`consumer` key, so they run on every
+# request through the data plane.
+#
+# Previously these had to be added by hand in the Konnect UI (see the
+# Terraform README's "Sending logs, metrics, and traces to Datadog"
+# section). They're config, not infrastructure, so they belong here rather
+# than in main.tf — this file is what turns that manual step into code.
+# ---------------------------------------------------------------------------
+plugins:
+  - name: prometheus
+    config:
+      per_consumer: true
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - kind:observability
+
+  - name: opentelemetry
+    config:
+      endpoint: '${{ env "DECK_OTEL_TRACES_ENDPOINT" }}'
+      resource_attributes:
+        service.name: kong-gateway
+        deployment.environment: '${{ env "DECK_ENVIRONMENT" }}'
+      batch_span_count: 200
+      batch_flush_delay: 3
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - kind:observability
+
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - kind:observability
+
+  # Cheap first line of defense — request bodies over this size are
+  # rejected before they ever reach an upstream.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: ${{ env "DECK_MAX_PAYLOAD_SIZE_MB" }}
+      size_unit: megabytes
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - kind:security

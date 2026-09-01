@@ -18,3 +18,10 @@ certs/*.key
 # Local kubeconfig exports
 *.kubeconfig
 kong-demo-config
+
+# decK — rendered/merged output is a build artifact, never source of truth
+kong-config/.rendered/
+
+# Local overrides of environment values (real secrets should come from a
+# secrets manager / CI secret store, never a committed file)
+kong-config/environments/*.local.env

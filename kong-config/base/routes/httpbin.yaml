@@ -1,0 +1,17 @@
+_format_version: "3.0"
+
+routes:
+  - name: httpbin-get
+    service:
+      name: httpbin
+    paths:
+      - /httpbin
+    methods:
+      - GET
+      - HEAD
+    strip_path: true
+    preserve_host: false
+    https_redirect_status_code: 426
+    tags:
+      - env:${{ env "DECK_ENVIRONMENT" }}
+      - kind:demo

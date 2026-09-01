@@ -69,34 +69,7 @@ declarative-config layer.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Client(["Client request"]) --> DP
-
-    subgraph Konnect["Kong Konnect — managed control plane"]
-        CP["Control Plane<br/>(Services · Routes · Plugins)"]
-    end
-
-    subgraph Azure["Azure"]
-        subgraph AKS["AKS cluster"]
-            subgraph KongNS["namespace: kong"]
-                DP["Kong Gateway<br/>data plane node"]
-            end
-            subgraph DDNS["namespace: datadog"]
-                DDAgent["Datadog Agent<br/>logs · OpenMetrics · OTLP"]
-            end
-        end
-    end
-
-    DP -->|"proxied via Service"| Backend(["Upstream backend"])
-    DP -.->|"config sync ↓ / status ↑  (mTLS)"| CP
-    DP -->|"logs, metrics, traces"| DDAgent
-    DDAgent -->|ships to| DatadogSaaS[("Datadog")]
-
-    style Konnect fill:#003459,color:#fff,stroke:#003459
-    style DDAgent fill:#632CA6,color:#fff,stroke:#632CA6
-    style DP fill:#0078D4,color:#fff,stroke:#0078D4
-```
+<img src="assets/architecture-animated.svg" alt="Animated diagram: a client request enters the Kong Gateway data plane node in AKS, is proxied to the upstream backend, while Kong Konnect pushes config down and receives status over mTLS, and the data plane ships logs, metrics, and traces to the Datadog Agent, which forwards them to Datadog SaaS" width="100%">
 
 **Control plane / data plane split:** Kong Konnect holds the managed
 control plane. The AKS cluster runs the self-managed data plane node,
@@ -119,19 +92,7 @@ the Terraform above — see
 [Configure the gateway (decK)](#configure-the-gateway-deck) and
 [CI/CD](#cicd).
 
-```mermaid
-flowchart LR
-    PR["Pull request\nkong-config/**"] --> Lint["deck file lint\n(rulesets/base.yaml)"]
-    Lint --> Diff["deck gateway diff\n(preview, dev + staging)"]
-    Diff --> Merge{{"Merge to main"}}
-    Merge --> SyncDev["sync → dev"]
-    SyncDev --> SyncStaging["sync → staging"]
-    SyncStaging --> Gate{{"Manual approval\n(prod GitHub Environment)"}}
-    Gate --> SyncProd["sync → prod"]
-
-    style Merge fill:#24292f,color:#fff
-    style Gate fill:#9a6700,color:#fff
-```
+<img src="assets/cicd-animated.svg" alt="Animated diagram: a pull request runs deck file lint then deck gateway diff; merging to main auto-syncs to dev, then staging; syncing to prod requires manual approval via a protected GitHub Environment" width="100%">
 
 ## What this creates
 

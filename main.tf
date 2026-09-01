@@ -1,6 +1,16 @@
 terraform {
   required_version = ">= 1.5.0"
 
+  # Remote state — Azure Storage, Azure AD (RBAC) auth so no storage account
+  # key is ever generated or stored. Backend blocks can't reference
+  # variables, so the actual resource_group_name / storage_account_name /
+  # container_name / key are supplied at `terraform init` time via
+  # -backend-config flags (see Makefile's `init` target and
+  # scripts/bootstrap-terraform-backend.sh for the one-time setup).
+  backend "azurerm" {
+    use_azuread_auth = true
+  }
+
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"

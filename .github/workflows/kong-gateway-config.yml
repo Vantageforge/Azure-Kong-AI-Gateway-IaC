@@ -17,11 +17,14 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to sync (used only when manually syncing prod)"
+        description: "Environment to sync manually — only prod is wired up here; dev/staging sync automatically on push to main."
         required: true
         default: prod
         type: choice
-        options: [dev, staging, prod]
+        options: [prod]
+
+permissions:
+  contents: read
 
 env:
   DECK_VERSION: "1.44.1"
@@ -44,8 +47,10 @@ jobs:
 
       - name: Install decK
         run: |
-          curl -sL "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz" -o deck.tar.gz
-          tar -xzf deck.tar.gz -C /usr/local/bin deck
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
           deck version
 
       - name: Render
@@ -79,8 +84,10 @@ jobs:
 
       - name: Install decK
         run: |
-          curl -sL "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz" -o deck.tar.gz
-          tar -xzf deck.tar.gz -C /usr/local/bin deck
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
 
       - name: deck gateway diff
         env:
@@ -101,12 +108,17 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: dev
+    concurrency:
+      group: kong-sync-dev
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - name: Install decK
         run: |
-          curl -sL "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz" -o deck.tar.gz
-          tar -xzf deck.tar.gz -C /usr/local/bin deck
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
       - name: deck gateway sync (dev)
         env:
           DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
@@ -122,12 +134,17 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
+    concurrency:
+      group: kong-sync-staging
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - name: Install decK
         run: |
-          curl -sL "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz" -o deck.tar.gz
-          tar -xzf deck.tar.gz -C /usr/local/bin deck
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
       - name: deck gateway sync (staging)
         env:
           DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}
@@ -145,12 +162,17 @@ jobs:
     # in Settings -> Environments — that's the actual approval gate, this
     # workflow just refuses to run sync-prod any other way.
     environment: prod
+    concurrency:
+      group: kong-sync-prod
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - name: Install decK
         run: |
-          curl -sL "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz" -o deck.tar.gz
-          tar -xzf deck.tar.gz -C /usr/local/bin deck
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/deck_${DECK_VERSION}_linux_amd64.tar.gz"
+          curl -sLO "https://github.com/Kong/deck/releases/download/v${DECK_VERSION}/checksums.txt"
+          grep "deck_${DECK_VERSION}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "deck_${DECK_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin deck
       - name: deck gateway sync (prod)
         env:
           DECK_KONNECT_TOKEN: ${{ secrets.KONNECT_TOKEN }}

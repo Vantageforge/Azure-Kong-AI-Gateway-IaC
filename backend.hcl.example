@@ -1,0 +1,15 @@
+# Copy to backend.hcl and fill in the values from scripts/tf-backend-bootstrap.sh
+# output. backend.hcl is gitignored. Then run `make init`.
+#
+# CI does not use this file — the terraform-infra.yml workflow passes the same
+# keys via -backend-config from repo variables (TFSTATE_*).
+
+resource_group_name  = "tfstate-rg"
+storage_account_name = "<globally-unique-name>"
+container_name       = "tfstate"
+key                  = "infra.tfstate"
+
+# Authenticate to the state storage with your `az login` identity (RBAC),
+# not a storage account key. The bootstrap script grants you the
+# "Storage Blob Data Contributor" role.
+use_azuread_auth = true

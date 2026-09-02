@@ -174,15 +174,26 @@ You'll also need:
 
 ## Deploy the infrastructure
 
+State is kept in Azure Blob Storage. Create the state backend once:
+
 ```bash
-make init      # terraform init
+TFSTATE_STORAGE_ACCOUNT=<globally-unique-name> ./scripts/tf-backend-bootstrap.sh
+cp backend.hcl.example backend.hcl        # fill in the values it prints
+```
+
+Then:
+
+```bash
+make init      # terraform init -backend-config=backend.hcl
 make plan      # terraform fmt + validate + plan
 make apply     # terraform apply
 ```
 
-(Or plain `terraform init && terraform plan && terraform apply`, if you'd
-rather not use the Makefile.) This provisions everything in one pass —
-roughly 8–12 minutes end to end. Re-running `make apply` after editing
+(Or plain `terraform init -backend-config=backend.hcl && terraform plan &&
+terraform apply`, if you'd rather not use the Makefile.) This provisions
+everything in one pass — roughly 8–12 minutes end to end. In CI this all runs
+through the [Terraform Infra pipeline](#terraform-infra-pipeline) instead.
+Re-running `make apply` after editing
 `local.kong_helm_values` (or the `kong_*` variables) triggers a rolling
 restart of the Kong pod automatically (env vars and annotations only take
 effect on a new pod, not the running one).
@@ -250,9 +261,13 @@ Azure-Kong-AI-Gateway-IaC/
 ├── kong-helm-values.tf         # local.kong_helm_values — full Kong chart values tree
 ├── variables.tf                # all input variables + defaults
 ├── outputs.tf                  # kubeconfig, cluster name, release status
+├── backend.tf                  # azurerm remote-state backend (partial config)
+├── backend.hcl.example         # copy to backend.hcl for `make init`
 ├── terraform.tfvars.example    # copy to terraform.tfvars and fill in
 ├── Makefile                    # terraform + decK targets — `make help`
 ├── .gitignore                  # excludes state, secrets, tfvars, rendered config
+├── scripts/
+│   └── tf-backend-bootstrap.sh  # one-time: create the state storage account
 ├── certs/
 │   ├── README.md
 │   ├── tls.crt   (you provide this)
@@ -268,7 +283,8 @@ Azure-Kong-AI-Gateway-IaC/
 │   ├── rulesets/base.yaml         # `deck file lint` governance rules
 │   └── scripts/                   # render.sh / lint.sh / diff.sh / sync.sh
 └── .github/workflows/
-    └── kong-gateway-config.yml   # lint+diff on PR, sync dev→staging on main, gated prod
+    ├── kong-gateway-config.yml   # lint+diff on PR, sync dev→staging on main, gated prod
+    └── terraform-infra.yml       # fmt/validate/plan on PR, dispatch-only apply/destroy
 ```
 
 ## Sending logs, metrics, and traces to Datadog
@@ -350,11 +366,63 @@ cycle on every change to `kong-config/`:
 | Push to `main` | Auto-sync to **dev**, then **staging** |
 | Manual dispatch (`environment: prod`) | Sync to **prod**, gated by the `prod` GitHub Environment's required reviewers |
 
-There's no equivalent Terraform pipeline in this repo yet — infra applies
-are still run locally with `make apply`. See
-[`kong-config/README.md`](kong-config/README.md#cicd) for the full
-gateway-config pipeline, including which secrets/variables each
-environment needs.
+See [`kong-config/README.md`](kong-config/README.md#cicd) for the full
+gateway-config pipeline, including which secrets/variables each environment
+needs.
+
+### Terraform Infra pipeline
+
+`.github/workflows/terraform-infra.yml` runs the Terraform in this repo — the
+AKS cluster, the Kong data plane Helm release, and the Datadog Agent. It only
+talks to Azure, never to Konnect.
+
+| Trigger | What runs |
+|---|---|
+| Pull request touching `*.tf` / `certs/**` | `terraform fmt -check` + `validate` + `plan`; the plan is posted as a PR comment |
+| Manual dispatch, `action: plan` | Plan only (artifact uploaded) |
+| Manual dispatch, `action: apply` | Plan, then `terraform apply` of that exact plan — gated by the `production` GitHub Environment's required reviewers |
+| Manual dispatch, `action: destroy` | A `-destroy` plan, then apply of that plan — same gate |
+
+Authentication is GitHub OIDC → Azure federated identity (no stored client
+secret). One-time setup:
+
+1. **State backend** — run `scripts/tf-backend-bootstrap.sh` (see
+   [Deploy the infrastructure](#deploy-the-infrastructure)). Pass
+   `CI_PRINCIPAL_ID=<oidc-sp-object-id>` so the pipeline's identity can read
+   and write state.
+2. **Entra ID app + federated credential:**
+
+   ```bash
+   az ad app create --display-name "github-terraform-infra"
+   APP_ID=$(az ad app list --display-name "github-terraform-infra" --query "[0].appId" -o tsv)
+   az ad sp create --id "$APP_ID"
+   az ad app federated-credential create --id "$APP_ID" --parameters '{
+     "name": "github-main",
+     "issuer": "https://token.actions.githubusercontent.com",
+     "subject": "repo:upxill/Azure-Kong-AI-Gateway-IaC:environment:production",
+     "audiences": ["api://AzureADTokenExchange"]
+   }'
+   # Repeat with subject "repo:upxill/Azure-Kong-AI-Gateway-IaC:pull_request" for PR plans.
+   az role assignment create --assignee "$APP_ID" --role "Contributor" \
+     --scope "/subscriptions/<sub-id>"
+   ```
+
+3. **GitHub repo → Settings → Secrets and variables → Actions:**
+
+   | Kind | Name | Value |
+   |---|---|---|
+   | Variable | `AZURE_CLIENT_ID` | the app's `appId` |
+   | Variable | `AZURE_TENANT_ID` | your Entra tenant id |
+   | Variable | `AZURE_SUBSCRIPTION_ID` | target subscription id |
+   | Variable | `TFSTATE_RESOURCE_GROUP` | from the bootstrap output |
+   | Variable | `TFSTATE_STORAGE_ACCOUNT` | from the bootstrap output |
+   | Variable | `TFSTATE_CONTAINER` | from the bootstrap output (`tfstate`) |
+   | Secret | `DATADOG_API_KEY` | Datadog API key → `TF_VAR_datadog_api_key` |
+   | Secret | `KONG_CLUSTER_CERT` | contents of `certs/tls.crt` |
+   | Secret | `KONG_CLUSTER_KEY` | contents of `certs/tls.key` |
+
+4. Add required reviewers to the `production` Environment so `apply` / `destroy`
+   pause for approval.
 
 ## Common gotchas
 

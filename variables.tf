@@ -34,14 +34,52 @@ variable "kong_namespace" {
   default     = "kong"
 }
 
-variable "kong_helm_values" {
-  description = <<-EOT
-    Full values passed to the Kong Helm chart, in the same shape as the
-    chart's own values.yaml (image, env, resources, proxy, admin, manager,
-    ingressController, secretVolumes, etc). Passed through as-is via
-    yamlencode(), so any key the chart supports can go here.
-  EOT
-  type = any
+variable "kong_image_repository" {
+  description = "Container image for the Kong Gateway data plane"
+  type        = string
+  default     = "kong/kong-gateway"
+}
+
+variable "kong_image_tag" {
+  description = "Kong Gateway image tag"
+  type        = string
+  default     = "3.15"
+}
+
+variable "kong_proxy_access_log" {
+  description = "Destination for Kong proxy access logs. /dev/stdout lets the Datadog Agent collect them; set to \"off\" to disable."
+  type        = string
+  default     = "/dev/stdout"
+}
+
+variable "kong_proxy_error_log" {
+  description = "Destination for Kong proxy error logs. /dev/stderr lets the Datadog Agent collect them."
+  type        = string
+  default     = "/dev/stderr"
+}
+
+variable "kong_status_listen" {
+  description = "Address:port for Kong's status/metrics listener. Exposes /metrics (OpenMetrics) for the Datadog Agent to scrape."
+  type        = string
+  default     = "0.0.0.0:8100"
+}
+
+variable "kong_dns_stale_ttl" {
+  description = "Kong dns_stale_ttl (seconds) as a string"
+  type        = string
+  default     = "3600"
+}
+
+variable "kong_resources_requests" {
+  description = "Resource requests for the Kong data plane pod"
+  type = object({
+    cpu    = number
+    memory = string
+  })
+  default = {
+    cpu    = 1
+    memory = "2Gi"
+  }
 }
 
 variable "datadog_api_key" {
@@ -50,8 +88,8 @@ variable "datadog_api_key" {
     Sensitive — set this via TF_VAR_datadog_api_key env var or a secrets
     manager rather than committing it in terraform.tfvars where possible.
   EOT
-  type      = string
-  sensitive = true
+  type        = string
+  sensitive   = true
 }
 
 variable "datadog_site" {

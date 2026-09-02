@@ -1,58 +1,25 @@
 # Copy this file to terraform.tfvars and fill in your own values.
-# terraform.tfvars is gitignored on purpose — it holds environment-specific
-# Konnect endpoints.
+# terraform.tfvars is gitignored on purpose — it holds the Datadog API key
+# and any environment-specific overrides.
 
-kong_helm_values = {
-  ingressController = {
-    enabled = false
-  }
+# Datadog Agent settings. datadog_api_key is sensitive — prefer the
+# TF_VAR_datadog_api_key env var or a secrets manager over committing it.
+datadog_api_key = "<your-datadog-api-key>"
+datadog_site    = "datadoghq.com"
 
-  image = {
-    repository = "kong/kong-gateway"
-    tag        = "3.15"
-  }
+# --- Kong data plane -----------------------------------------------------
+# The full Helm values tree is assembled in kong-helm-values.tf. The Konnect
+# control plane + telemetry endpoints are pinned there; everything else is a
+# variable with a default in variables.tf — override here only if needed.
+# kong_image_repository   = "kong/kong-gateway"
+# kong_image_tag          = "3.15"
+# kong_proxy_access_log   = "/dev/stdout"
+# kong_proxy_error_log    = "/dev/stderr"
+# kong_status_listen      = "0.0.0.0:8100"
+# kong_dns_stale_ttl      = "3600"
+# kong_resources_requests = { cpu = 1, memory = "2Gi" }
 
-  secretVolumes = ["kong-cluster-cert"]
-
-  env = {
-    role         = "data_plane"
-    database     = "off"
-    konnect_mode = "on"
-    vitals       = "off"
-    cluster_mtls = "pki"
-
-    cluster_control_plane         = "<your-control-plane-endpoint>"
-    cluster_telemetry_endpoint    = "<your-telemetry-endpoint>:443"
-    cluster_telemetry_server_name = "<your-telemetry-endpoint>"
-    cluster_cert                  = "/etc/secrets/kong-cluster-cert/tls.crt"
-    cluster_cert_key              = "/etc/secrets/kong-cluster-cert/tls.key"
-
-    lua_ssl_trusted_certificate = "system"
-    proxy_access_log            = "off"
-    dns_stale_ttl               = "3600"
-  }
-
-  resources = {
-    requests = {
-      cpu    = 1
-      memory = "2Gi"
-    }
-  }
-
-  proxy = {
-    enabled = true
-  }
-
-  admin = {
-    enabled = false
-  }
-
-  manager = {
-    enabled = false
-  }
-}
-
-# Optional overrides — defaults are already set in variables.tf
+# --- Optional cluster overrides — defaults are set in variables.tf ------
 # resource_group_name = "kong-demo-rg"
 # location             = "eastus"
 # cluster_name         = "kong-demo-aks"

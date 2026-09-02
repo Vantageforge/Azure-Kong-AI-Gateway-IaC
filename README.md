@@ -145,28 +145,32 @@ You'll also need:
 2. Download the generated certificate and key, and save them as:
    - `certs/tls.crt`
    - `certs/tls.key`
-3. Note the **Control Plane endpoint** and **Telemetry endpoint** shown in Konnect.
+3. Note the **Control Plane endpoint** and **Telemetry endpoint** shown in
+   Konnect, and set them in `local.kong_helm_values` in `kong-helm-values.tf`
+   (`cluster_control_plane`, `cluster_telemetry_endpoint`,
+   `cluster_telemetry_server_name`).
 4. Copy the example vars file:
 
    ```bash
    cp terraform.tfvars.example terraform.tfvars
    ```
 
-   Fill in your Konnect endpoints, and set the Datadog API key — preferably
-   as an environment variable rather than committing it to the file:
+   Set the Datadog API key — preferably as an environment variable rather than
+   committing it to the file:
 
    ```bash
    export TF_VAR_datadog_api_key="<your-datadog-api-key>"
    ```
 
-   `kong_helm_values` in `terraform.tfvars` is passed straight through to the
-   Kong Helm chart via `yamlencode()`, so it accepts the exact same keys as
-   the chart's own `values.yaml` — `image`, `env`, `resources`, `proxy`,
-   `admin`, `manager`, `ingressController`, `secretVolumes`, `podAnnotations`, etc.
-
-   > Note: `.tfvars` files don't support function calls like `jsonencode()`.
-   > The `podAnnotations` block uses a heredoc (`<<-EOT ... EOT`) with literal
-   > JSON text instead — keep that pattern if you add more annotations.
+   The full Kong Helm chart values tree is assembled in `local.kong_helm_values`
+   (`kong-helm-values.tf`) and passed through via `yamlencode()`.
+   Environment-specific knobs are exposed as variables with defaults in
+   `variables.tf` — `kong_image_repository`, `kong_image_tag`,
+   `kong_proxy_access_log`, `kong_proxy_error_log`, `kong_status_listen`,
+   `kong_dns_stale_ttl`, `kong_resources_requests`. Override them in
+   `terraform.tfvars` or via `TF_VAR_*`. The Konnect endpoints and the static
+   chart toggles (`role`, `database`, `konnect_mode`, `proxy`/`admin`/`manager`
+   enablement, `podAnnotations`) are pinned directly in the local.
 
 ## Deploy the infrastructure
 
@@ -179,9 +183,9 @@ make apply     # terraform apply
 (Or plain `terraform init && terraform plan && terraform apply`, if you'd
 rather not use the Makefile.) This provisions everything in one pass —
 roughly 8–12 minutes end to end. Re-running `make apply` after editing
-`kong_helm_values` triggers a rolling restart of the Kong pod automatically
-(env vars and annotations only take effect on a new pod, not the running
-one).
+`local.kong_helm_values` (or the `kong_*` variables) triggers a rolling
+restart of the Kong pod automatically (env vars and annotations only take
+effect on a new pod, not the running one).
 
 > **AKS SKU note:** the default `node_vm_size` is `Standard_D4s_v7`.
 > Azure's allowed VM sizes vary by subscription/region — if you get a
@@ -243,6 +247,7 @@ creating it by hand in Konnect.
 Azure-Kong-AI-Gateway-IaC/
 ├── main.tf                     # AKS cluster, Kong namespace/secret/helm_release,
 │                                # Datadog namespace/secret/helm_release
+├── kong-helm-values.tf         # local.kong_helm_values — full Kong chart values tree
 ├── variables.tf                # all input variables + defaults
 ├── outputs.tf                  # kubeconfig, cluster name, release status
 ├── terraform.tfvars.example    # copy to terraform.tfvars and fill in
@@ -277,7 +282,7 @@ global-scoped plugins, so once synced once, they cover every Service and
 Route without further setup:
 
 - **`prometheus`** turns on Kong's `/metrics` endpoint, which the
-  `podAnnotations` already in `terraform.tfvars` tell the Datadog Agent to
+  `podAnnotations` in `kong-helm-values.tf` tell the Datadog Agent to
   scrape via OpenMetrics.
 - **`opentelemetry`** exports traces to the in-cluster Datadog Agent OTLP
   HTTP receiver, `http://datadog.datadog.svc.cluster.local:4318/v1/traces`
@@ -286,8 +291,9 @@ Route without further setup:
   sent *after* this plugin is synced.
 
 Logs need no extra plugin. Kong's `KONG_PROXY_ACCESS_LOG` /
-`KONG_PROXY_ERROR_LOG` env vars (set to `/dev/stdout` / `/dev/stderr` in
-`terraform.tfvars`) make Kong write access/error logs to stdout, and the
+`KONG_PROXY_ERROR_LOG` env vars (set to `/dev/stdout` / `/dev/stderr` via the
+`kong_proxy_access_log` / `kong_proxy_error_log` variables) make Kong write
+access/error logs to stdout, and the
 Datadog Agent's `containerCollectAll` picks up every pod's stdout
 automatically — no per-app config needed.
 
@@ -353,12 +359,10 @@ environment needs.
 ## Common gotchas
 
 - **Config changes not showing up in Datadog:** `terraform apply` must
-  actually run again after editing `kong_helm_values` — check
-  `terraform plan` shows pending changes to `helm_release.kong` first.
-  Env vars and pod annotations only apply to a newly created pod.
-- **`Error: Function calls not allowed` on `terraform init`:** `.tfvars`
-  files can't call `jsonencode()` or similar functions — use a heredoc with
-  literal JSON text instead (see the `podAnnotations` block).
+  actually run again after editing `local.kong_helm_values` (or the `kong_*`
+  variables) — check `terraform plan` shows pending changes to
+  `helm_release.kong` first. Env vars and pod annotations only apply to a
+  newly created pod.
 - **`OIDCIssuerFeatureCannotBeDisabled` on `terraform apply`:** Azure now
   enables the OIDC issuer by default on new AKS clusters; `main.tf` sets
   `oidc_issuer_enabled = true` explicitly to avoid Terraform trying to

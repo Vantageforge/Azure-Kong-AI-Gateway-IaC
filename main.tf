@@ -107,7 +107,7 @@ resource "helm_release" "kong" {
   chart      = "kong"
   namespace  = kubernetes_namespace.kong.metadata[0].name
 
-  values = [yamlencode(var.kong_helm_values)]
+  values = [yamlencode(local.kong_helm_values)]
 
   depends_on = [kubernetes_secret.kong_cluster_cert]
 }

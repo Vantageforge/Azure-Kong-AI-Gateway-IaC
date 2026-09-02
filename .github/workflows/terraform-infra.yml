@@ -1,0 +1,170 @@
+name: Terraform Infra (AKS + Kong + Datadog)
+
+# Infrastructure pipeline for the Terraform in this repo: the AKS cluster, the
+# Kong hybrid data plane Helm release, and the Datadog Agent.
+#
+# Deliberately separate from kong-gateway-config.yml (decK): that one only ever
+# talks to Konnect's control-plane API, this one only ever talks to Azure.
+#
+#   pull_request        -> fmt + validate + plan, plan posted as a PR comment
+#   workflow_dispatch   -> plan (always), then apply | destroy when selected,
+#                          gated by the "production" GitHub Environment's
+#                          required reviewers
+on:
+  pull_request:
+    paths:
+      - "*.tf"
+      - ".terraform.lock.hcl"
+      - "certs/**"
+      - "scripts/tf-backend-bootstrap.sh"
+      - ".github/workflows/terraform-infra.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply, destroy]
+
+permissions:
+  contents: read
+  id-token: write        # request the GitHub OIDC token for Azure federated auth
+  pull-requests: write   # post the plan as a PR comment
+
+env:
+  TF_VERSION: "1.9.8"
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_OIDC: "true"
+  ARM_USE_AZUREAD: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Always runs: fmt + validate + plan. On PRs the plan is posted as a
+  # comment; on workflow_dispatch it's the artifact the apply job consumes.
+  # -------------------------------------------------------------------------
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # main.tf reads certs/tls.{crt,key} via file() at plan time, so they must
+      # exist even for a plan. They're the Konnect data-plane mTLS cert/key.
+      - name: Materialize Konnect cert/key
+        run: |
+          mkdir -p certs
+          printf '%s\n' "${{ secrets.KONG_CLUSTER_CERT }}" > certs/tls.crt
+          printf '%s\n' "${{ secrets.KONG_CLUSTER_KEY }}" > certs/tls.key
+          test -s certs/tls.crt && test -s certs/tls.key
+
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=infra.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+          # destroy plan when the dispatch asks for a teardown
+          PLAN_ARGS: ${{ (github.event_name == 'workflow_dispatch' && inputs.action == 'destroy') && '-destroy' || '' }}
+        run: |
+          terraform plan -no-color -input=false $PLAN_ARGS -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            tfplan
+            plan.txt
+          retention-days: 5
+
+      - name: Post plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('plan.txt', 'utf8');
+            const max = 60000;
+            if (plan.length > max) plan = plan.slice(0, max) + '\n... (truncated, see the tfplan artifact)';
+            const body = `#### Terraform plan \`${context.sha.slice(0,7)}\`\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const mine = comments.find(c => c.user.type === 'Bot' && c.body.startsWith('#### Terraform plan'));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
+
+  # -------------------------------------------------------------------------
+  # Applies exactly the plan the `plan` job produced. Gated by the
+  # "production" Environment — configure required reviewers there.
+  # -------------------------------------------------------------------------
+  apply:
+    name: apply
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && (inputs.action == 'apply' || inputs.action == 'destroy')
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: terraform-infra
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Materialize Konnect cert/key
+        run: |
+          mkdir -p certs
+          printf '%s\n' "${{ secrets.KONG_CLUSTER_CERT }}" > certs/tls.crt
+          printf '%s\n' "${{ secrets.KONG_CLUSTER_KEY }}" > certs/tls.key
+          test -s certs/tls.crt && test -s certs/tls.key
+
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=infra.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - name: Terraform apply
+        env:
+          TF_VAR_datadog_api_key: ${{ secrets.DATADOG_API_KEY }}
+        run: terraform apply -no-color -input=false tfplan

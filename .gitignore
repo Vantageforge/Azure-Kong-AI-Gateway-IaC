@@ -1,6 +1,5 @@
 # Terraform
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log
@@ -10,6 +9,14 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Local-only backend config (CI passes -backend-config from repo variables)
+backend.hcl
+
+# Saved plans
+tfplan
+*.tfplan
+plan.txt
 
 # Secrets — never commit your Konnect cert/key
 certs/*.crt

@@ -5,8 +5,8 @@
 # ---------------------------------------------------------------------------
 
 .PHONY: init plan apply destroy fmt validate
-init:      ## terraform init
-	terraform init
+init:      ## terraform init (uses backend.hcl — copy from backend.hcl.example first)
+	terraform init -backend-config=backend.hcl
 
 fmt:       ## terraform fmt -recursive
 	terraform fmt -recursive
